@@ -25,7 +25,7 @@ class SimpleFlowController(app_manager.RyuApp):
         datapath = ev.msg.datapath
         self.datapaths[datapath.id] = datapath
         self.logger.info("Switch connected: %s", datapath.id)
-        
+
         self.add_arp_flow(datapath)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -72,6 +72,39 @@ class SimpleFlowController(app_manager.RyuApp):
         datapath.send_msg(mod)
         self.logger.info("ARP flow added")
 
+    def add_default_flood_flow(self, datapath):
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+        match = parser.OFPMatch()
+        actions = [parser.OFPActionOutput(ofproto.OFPP_FLOOD)]
+        inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
+        mod = parser.OFPFlowMod(datapath=datapath, 
+                                priority=1, 
+                                match=match, 
+                                instructions=inst)
+        datapath.send_msg(mod)
+        self.logger.info("Default flood flow ENABLED on switch %s", datapath.id)
+
+    def add_default_flood_flow_all(self):
+        for datapath_id, datapath in self.datapaths.items():
+            self.add_default_flood_flow(datapath)
+
+    def remove_default_flood_flow(self, datapath):
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+        match = parser.OFPMatch()
+        mod = parser.OFPFlowMod(datapath=datapath,
+                                command=ofproto.OFPFC_DELETE,
+                                out_port=ofproto.OFPP_ANY,
+                                out_group=ofproto.OFPG_ANY,
+                                priority=1,
+                                match=match)
+        datapath.send_msg(mod)
+        self.logger.info("Default flood flow DISABLED on switch %s", datapath.id)
+
+    def remove_default_flood_flow_all(self):
+        for datapath_id, datapath in self.datapaths.items():
+            self.remove_default_flood_flow(datapath)
 
 
 class RestFlowAPI(ControllerBase):
@@ -129,3 +162,24 @@ class RestFlowAPI(ControllerBase):
             return Response(status=500, content_type='application/json', charset='utf-8',
                             text=json.dumps({'error': str(e)}))
 
+    @route('flood_enable', '/flood/enable', methods=['POST'])
+    def flood_enable(self, req, **kwargs):
+        try:
+            self.controller.add_default_flood_flow_all()
+            return Response(content_type='application/json', charset='utf-8',
+                            text=json.dumps({'status': 'flood enabled'}))
+        
+        except Exception as e:
+            return Response(status=500, content_type='application/json', charset='utf-8',
+                            text=json.dumps({'error': str(e)}))
+
+    @route('flood_disable', '/flood/disable', methods=['POST'])
+    def flood_disable(self, req, **kwargs):
+        try:
+            self.controller.remove_default_flood_flow_all()
+            return Response(content_type='application/json', charset='utf-8',
+                            text=json.dumps({'status': 'flood disabled'}))
+
+        except Exception as e:
+            return Response(status=500, content_type='application/json', charset='utf-8',
+                            text=json.dumps({'error': str(e)}))
